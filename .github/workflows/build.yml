@@ -150,4 +150,4 @@ jobs:
           path: |
             openwrt/logs
             openwrt/.config
-        include-hidden-files: true
+          include-hidden-files: true
