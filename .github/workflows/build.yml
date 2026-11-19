@@ -27,7 +27,7 @@ jobs:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
         with:
-          tool-cache: true
+          preinstalled-runtimes: true
           android: true
           dotnet: true
           haskell: true
@@ -55,34 +55,54 @@ jobs:
           sed -i 's/\r$//' ../config/* ../scripts/*.sh
           cat ../config/feeds.extra >> feeds.conf.default
           ./scripts/feeds update -a
-          # 官方 feeds 没有 OAF 时，补充 OpenAppFilter 源
-          if ! ./scripts/feeds list | awk '{print $1}' | grep -qx kmod-oaf; then
-            echo "未找到 kmod-oaf，添加 OpenAppFilter 源"
-            echo "src-git oaf https://github.com/destan19/OpenAppFilter.git" >> feeds.conf.default
-            ./scripts/feeds update oaf
-          fi
+
+          add_feed_if_missing() {
+            local pkg="$1" name="$2" url="$3"
+            if ! ./scripts/feeds list | awk '{print $1}' | grep -qx "$pkg"; then
+              echo "补充源 $name ($pkg): $url"
+              echo "src-git $name $url" >> feeds.conf.default
+              ./scripts/feeds update "$name"
+            fi
+          }
+          add_feed_if_missing kmod-oaf oaf "https://github.com/destan19/OpenAppFilter.git"
+          add_feed_if_missing quickstart nas "https://github.com/linkease/nas-packages.git;master"
+          add_feed_if_missing luci-app-quickstart nas_luci "https://github.com/linkease/nas-packages-luci.git;main"
+          add_feed_if_missing luci-app-diskman diskman "https://github.com/jjm2473/luci-app-diskman.git;dev"
+
+          # 克隆作者原版 ROM 中包含的第三方插件（Aurora 主题、OpenClash、Lucky、daede）
+          mkdir -p package/feeds-extra
+          git clone --depth 1 https://github.com/eamonxg/luci-theme-aurora.git package/feeds-extra/luci-theme-aurora
+          git clone --depth 1 https://github.com/eamonxg/luci-app-aurora-config.git package/feeds-extra/luci-app-aurora-config
+          git clone --depth 1 https://github.com/gdy666/luci-app-lucky.git package/feeds-extra/luci-app-lucky
+          git clone --depth 1 https://github.com/vernesong/OpenClash.git package/feeds-extra/OpenClash
+          git clone --depth 1 https://github.com/kenzok8/openwrt-daede.git package/feeds-extra/openwrt-daede
+          # 本固件已开启原生内核 BTF (CONFIG_KERNEL_DEBUG_INFO_BTF=y)，去掉外部 vmlinux-btf 假包依赖
+          find package/feeds-extra/openwrt-daede -name Makefile -exec sed -i 's/+vmlinux-btf//g' {} +
+
           ./scripts/feeds install -a
           cat feeds.conf.default
 
       - name: Generate .config
         working-directory: openwrt
         run: |
+          # 两遍 defconfig：第一遍解绑 BusyBox applet 并启用基础包(ruby/uhttpd/wpad-basic)，第二遍激活条件依赖包(tar/luci-app-store/ruby-*/wpa-cli)
           cat ../config/target.config ../config/istoreos-custom.config > .config
+          make defconfig
+          cat ../config/istoreos-custom.config >> .config
           make defconfig
           bash ../scripts/verify-config.sh
 
       - name: Fix kernel config (6.12 new symbols)
         working-directory: openwrt
         run: |
-          # 开启 THP 后 6.12 新增的 TRANSPARENT_HUGEPAGE_NEVER 未在 OpenWrt 内核配置中定义，
-          # 会导致内核 syncconfig 交互式提问并在 CI 中失败，这里显式补上
           for f in target/linux/generic/config-6.*; do
             grep -q 'TRANSPARENT_HUGEPAGE_NEVER' "$f" || echo '# CONFIG_TRANSPARENT_HUGEPAGE_NEVER is not set' >> "$f"
             echo "patched: $f"
           done
-          # 拷入 rt2x00 PCI MWI 补丁：内核 6.12 已删除 pci_set_mwi/pci_clear_mwi
-          mkdir -p package/kernel/mac80211/patches/rt2x00
-          cp ../patches/mac80211/rt2x00/997-rt2x00pci-drop-pci-mwi.patch package/kernel/mac80211/patches/rt2x00/
+          if [ -f ../patches/997-rt2x00pci-drop-pci-mwi.patch ]; then
+            mkdir -p package/kernel/mac80211/patches/rt2x00
+            cp -v ../patches/997-rt2x00pci-drop-pci-mwi.patch package/kernel/mac80211/patches/rt2x00/
+          fi
 
       - name: Download sources
         working-directory: openwrt
@@ -94,7 +114,6 @@ jobs:
         working-directory: openwrt
         run: |
           echo "使用 $(nproc) 线程编译"
-          # 若内核还有其他 (NEW) 配置项提问，用回车自动采用默认值，避免 CI 卡死报错
           { yes '' || true; } | make -j$(nproc) IGNORE_ERRORS=m || \
           { yes '' || true; } | make -j1 V=s IGNORE_ERRORS=m
 
@@ -150,4 +169,5 @@ jobs:
           path: |
             openwrt/logs
             openwrt/.config
-          include-hidden-files: true
+            openwrt/build_dir/target-*/linux-amlogic_meson/linux-*/.config
+            openwrt/build_dir/target-*/linux-amlogic_meson/mac80211-regular/backports-*/.config
