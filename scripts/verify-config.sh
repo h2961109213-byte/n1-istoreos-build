@@ -20,6 +20,9 @@ for item in \
   CONFIG_BUILD_LOG=y \
   CONFIG_PACKAGE_kmod-nfnetlink-queue=y \
   CONFIG_PACKAGE_kmod-nft-queue=y \
+  CONFIG_PACKAGE_kmod-sched-bpf=y \
+  CONFIG_PACKAGE_kmod-xdp-sockets-diag=y \
+  CONFIG_BPF_TOOLCHAIN_NONE=y \
   CONFIG_KERNEL_DEBUG_INFO_BTF=y \
   CONFIG_PACKAGE_kmod-brcmfmac=y \
   CONFIG_BRCMFMAC_SDIO=y \
@@ -54,6 +57,19 @@ if grep -q '^CONFIG_TARGET_ROOTFS_EXT4FS=y' "$CFG"; then
 else
   echo "OK   CONFIG_TARGET_ROOTFS_EXT4FS 已关闭"
 fi
+
+for forbidden in \
+  CONFIG_HAS_BPF_TOOLCHAIN=y \
+  CONFIG_PACKAGE_dae=y \
+  CONFIG_PACKAGE_daed=y \
+  CONFIG_PACKAGE_luci-app-daede=y; do
+  if grep -qx "$forbidden" "$CFG"; then
+    echo "::error::禁止项仍被启用（会触发 bpf-headers）: $forbidden"
+    fail=1
+  else
+    echo "OK   未启用 $forbidden"
+  fi
+done
 
 echo "===== 3. 禁用项检查（防止 PCI/DAHDI/mt76-pci 模块被重新选回） ====="
 while IFS= read -r sym; do
