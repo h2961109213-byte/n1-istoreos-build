@@ -69,15 +69,12 @@ jobs:
           add_feed_if_missing luci-app-quickstart nas_luci "https://github.com/linkease/nas-packages-luci.git;main"
           add_feed_if_missing luci-app-diskman diskman "https://github.com/jjm2473/luci-app-diskman.git;dev"
 
-          # 克隆作者原版 ROM 中包含的第三方插件（Aurora 主题、OpenClash、Lucky、daede）
+          # 克隆作者原版 ROM 中包含的第三方插件（Aurora 主题、OpenClash、Lucky）
           mkdir -p package/feeds-extra
           git clone --depth 1 https://github.com/eamonxg/luci-theme-aurora.git package/feeds-extra/luci-theme-aurora
           git clone --depth 1 https://github.com/eamonxg/luci-app-aurora-config.git package/feeds-extra/luci-app-aurora-config
           git clone --depth 1 https://github.com/gdy666/luci-app-lucky.git package/feeds-extra/luci-app-lucky
           git clone --depth 1 https://github.com/vernesong/OpenClash.git package/feeds-extra/OpenClash
-          git clone --depth 1 https://github.com/kenzok8/openwrt-daede.git package/feeds-extra/openwrt-daede
-          # 本固件已开启原生内核 BTF (CONFIG_KERNEL_DEBUG_INFO_BTF=y)，去掉外部 vmlinux-btf 假包依赖
-          find package/feeds-extra/openwrt-daede -name Makefile -exec sed -i 's/+vmlinux-btf//g' {} +
 
           ./scripts/feeds install -a
           cat feeds.conf.default
@@ -99,10 +96,15 @@ jobs:
             grep -q 'TRANSPARENT_HUGEPAGE_NEVER' "$f" || echo '# CONFIG_TRANSPARENT_HUGEPAGE_NEVER is not set' >> "$f"
             echo "patched: $f"
           done
-          if [ -f ../patches/997-rt2x00pci-drop-pci-mwi.patch ]; then
-            mkdir -p package/kernel/mac80211/patches/rt2x00
-            cp -v ../patches/997-rt2x00pci-drop-pci-mwi.patch package/kernel/mac80211/patches/rt2x00/
-          fi
+          for p in \
+            ../patches/mac80211/rt2x00/997-rt2x00pci-drop-pci-mwi.patch \
+            ../patches/997-rt2x00pci-drop-pci-mwi.patch; do
+            if [ -f "$p" ]; then
+              mkdir -p package/kernel/mac80211/patches/rt2x00
+              cp -v "$p" package/kernel/mac80211/patches/rt2x00/
+              break
+            fi
+          done
 
       - name: Download sources
         working-directory: openwrt
@@ -114,8 +116,8 @@ jobs:
         working-directory: openwrt
         run: |
           echo "使用 $(nproc) 线程编译"
-          { yes '' || true; } | make -j$(nproc) IGNORE_ERRORS=m || \
-          { yes '' || true; } | make -j1 V=s IGNORE_ERRORS=m
+          make -j$(nproc) IGNORE_ERRORS=m </dev/null || \
+          make -j1 V=sc BUILD_LOG=0 IGNORE_ERRORS=m </dev/null
 
       - name: Check rootfs size & BTF
         working-directory: openwrt
@@ -161,8 +163,8 @@ jobs:
           name: istoreos-n1-kmods-${{ github.run_number }}
           path: kmods
 
-      - name: Upload logs on failure
-        if: failure()
+      - name: Upload logs on failure or cancel
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs-${{ github.run_number }}
