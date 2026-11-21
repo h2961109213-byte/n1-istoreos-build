@@ -133,7 +133,11 @@ jobs:
           else
             echo "::warning::未找到 root.squashfs，跳过大小检查"
           fi
-          VM=$(find build_dir -maxdepth 4 -path '*linux-amlogic*' -name vmlinux | head -n1)
+          VM=$(find build_dir -path '*linux-amlogic*' -name 'vmlinux.debug' | head -n1)
+          if [ -z "$VM" ]; then
+            VM=$(find build_dir -path '*linux-amlogic*/linux-*' -name vmlinux | head -n1)
+          fi
+          echo "检查内核文件: $VM"
           if [ -n "$VM" ] && readelf -S "$VM" | grep -q '\.BTF'; then
             echo "内核包含 BTF ✅ (dae 可用)"
           else
